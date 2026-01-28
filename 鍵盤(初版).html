@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>注音鍵盤互動導覽</title>
+    
+    <!-- 1. 引入 Tailwind CSS (樣式庫) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- 2. 引入 React 和 ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    
+    <!-- 3. 引入 Babel (讓瀏覽器看得懂 JSX) -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+        /* 自定義動畫樣式 */
+        @keyframes fade-in-down {
+            0% { opacity: 0; transform: translateY(-10px); }
+            100% { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in-down {
+            animation: fade-in-down 0.3s ease-out;
+        }
+        body {
+            font-family: 'Microsoft JhengHei', 'Noto Sans TC', sans-serif;
+        }
+    </style>
+</head>
+<body class="bg-slate-50">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState } = React;
+
+        // --- 簡易圖示組件 (替代 lucide-react，確保單一檔案可執行) ---
+        const IconBase = ({ children, className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>{children}</svg>
+        );
+        const Hand = (props) => <IconBase {...props}><path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0"/><path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2"/><path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></IconBase>;
+        const KeyboardIcon = (props) => <IconBase {...props}><rect width="20" height="16" x="2" y="4" rx="2" ry="2"/><path d="M6 8h.001"/><path d="M10 8h.001"/><path d="M14 8h.001"/><path d="M18 8h.001"/><path d="M6 12h.001"/><path d="M10 12h.001"/><path d="M14 12h.001"/><path d="M18 12h.001"/><path d="M7 16h10"/></IconBase>;
+        const MousePointer2 = (props) => <IconBase {...props}><path d="m12 19 7-7 3 3V2L2 11l8 1z"/></IconBase>;
+        const Info = (props) => <IconBase {...props}><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></IconBase>;
+        const Layout = (props) => <IconBase {...props}><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><line x1="3" x2="21" y1="9" y2="9"/><line x1="9" x2="9" y1="9" y2="21"/></IconBase>;
+        const Scan = (props) => <IconBase {...props}><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/></IconBase>;
+        const Volume2 = (props) => <IconBase {...props}><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></IconBase>;
+        const Type = (props) => <IconBase {...props}><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" x2="15" y1="20" y2="20"/><line x1="12" x2="12" y1="4" y2="20"/></IconBase>;
+
+        // --- 資料結構定義 ---
+        const FINGER_ZONES = {
+            'pinky-l': { color: 'bg-red-200 border-red-400', label: '左手小指', desc: '負責最外側按鍵，力量較小，需多練習。' },
+            'ring-l': { color: 'bg-orange-200 border-orange-400', label: '左手無名指', desc: '負責 "2, W, S, X" 垂直區域。' },
+            'middle-l': { color: 'bg-yellow-200 border-yellow-400', label: '左手中指', desc: '負責 "3, E, D, C" 垂直區域。' },
+            'index-l': { color: 'bg-green-200 border-green-400', label: '左手食指', desc: '負責最寬的區域 (4, 5, R, T, F, G, V, B)，是最靈活的手指。' },
+            'index-r': { color: 'bg-cyan-200 border-cyan-400', label: '右手食指', desc: '負責 (6, 7, Y, U, H, J, N, M)，注意 J鍵 上有定位點。' },
+            'middle-r': { color: 'bg-blue-200 border-blue-400', label: '右手中指', desc: '負責 "8, I, K, ," 垂直區域。' },
+            'ring-r': { color: 'bg-indigo-200 border-indigo-400', label: '右手無名指', desc: '負責 "9, O, L, ." 垂直區域。' },
+            'pinky-r': { color: 'bg-purple-200 border-purple-400', label: '右手小指', desc: '負責右側外圍所有按鍵 (0, P, Enter, Shift等)。' },
+            'thumb': { color: 'bg-slate-300 border-slate-500', label: '大拇指', desc: '雙手大拇指專門負責空白鍵 (Space)。' },
+            'system': { color: 'bg-gray-200 border-gray-400', label: '系統功能鍵', desc: '較少用到的功能鍵。' }
+        };
+
+        const FUNCTION_DESC = {
+            'Esc': '取消/退出：用來離開全螢幕或取消當前動作。',
+            'Tab': '縮排/跳格：在文書處理中用來對齊文字，或在表單中跳到下一格。',
+            'Caps': '大寫鎖定：按下後，輸入的英文字母全都會變成大寫。',
+            'Shift': '上檔鍵：按住不放再按字母會變大寫；按住再按數字鍵會打出上方的符號 (如 ! @ #)。',
+            'Ctrl': '控制鍵：通常配合其他鍵使用，如 Ctrl+C (複製)、Ctrl+V (貼上)。',
+            'Alt': '換擋鍵：配合其他鍵使用，如 Alt+Tab (切換視窗)。',
+            'Space': '空白鍵：輸入空白，或在遊戲中常用於跳躍。',
+            'Backspace': '退格鍵：刪除游標「左邊」的字。',
+            'Enter': '確認/換行：執行指令或在打字時換到下一行。',
+            'F1-F12': '功能鍵：依據軟體不同有不同功能，F1通常是「說明」。',
+            'Win': '開始鍵：開啟電腦的開始選單。'
+        };
+
+        const TUTORIAL_SECTIONS = {
+            'anchors': {
+                label: '基準鍵 (定位點)',
+                icon: <Scan className="w-4 h-4" />,
+                keys: ['F', 'J'],
+                desc: '這是鍵盤上最重要的兩個鍵！F 和 J 鍵上通常有小小的凸起，讓你的雙手食指在不看鍵盤的情況下，也能摸到正確的位置。這就是所謂的「盲打」基礎。',
+                highlightClass: 'ring-4 ring-yellow-400 z-10 scale-105 bg-yellow-100 border-yellow-400'
+            },
+            'zhuyin': {
+                label: '注音符號區',
+                icon: <Type className="w-4 h-4" />,
+                desc: '這是主要的打字區域。左手負責ㄅㄆㄇ等聲母，右手負責韻母。熟練這區的位置是打字速度的關鍵。',
+                highlightClass: 'bg-green-100 border-green-400'
+            },
+            'tones': {
+                label: '聲調符號區',
+                icon: <Volume2 className="w-4 h-4" />,
+                keys: ['3', '4', '6', '7', 'Space'],
+                desc: '注音有五種聲調：三聲(ˇ)在數字3、四聲(ˋ)在數字4、二聲(ˊ)在數字6、輕聲(˙)在數字7。而最常用的一聲(陰平)則是直接按「空白鍵」。',
+                highlightClass: 'bg-blue-100 border-blue-400'
+            }
+        };
+
+        const KEYBOARD_ROWS = [
+            // 功能鍵列
+            [
+                { w: 1, label: 'Esc', zone: 'pinky-l', type: 'func' },
+                { w: 1, gap: true },
+                { w: 1, label: 'F1', zone: 'pinky-l', type: 'func' }, { w: 1, label: 'F2', zone: 'pinky-l', type: 'func' }, { w: 1, label: 'F3', zone: 'ring-l', type: 'func' }, { w: 1, label: 'F4', zone: 'middle-l', type: 'func' },
+                { w: 0.5, gap: true },
+                { w: 1, label: 'F5', zone: 'index-l', type: 'func' }, { w: 1, label: 'F6', zone: 'index-l', type: 'func' }, { w: 1, label: 'F7', zone: 'index-r', type: 'func' }, { w: 1, label: 'F8', zone: 'index-r', type: 'func' },
+                { w: 0.5, gap: true },
+                { w: 1, label: 'F9', zone: 'middle-r', type: 'func' }, { w: 1, label: 'F10', zone: 'ring-r', type: 'func' }, { w: 1, label: 'F11', zone: 'pinky-r', type: 'func' }, { w: 1, label: 'F12', zone: 'pinky-r', type: 'func' }
+            ],
+            // 數字列
+            [
+                { w: 1, label: '`', sub: '~', zh: '', zone: 'pinky-l' },
+                { w: 1, label: '1', sub: '!', zh: 'ㄅ', zone: 'pinky-l' },
+                { w: 1, label: '2', sub: '@', zh: 'ㄉ', zone: 'ring-l' },
+                { w: 1, label: '3', sub: '#', zh: 'ˇ', zone: 'middle-l' },
+                { w: 1, label: '4', sub: '$', zh: 'ˋ', zone: 'index-l' },
+                { w: 1, label: '5', sub: '%', zh: 'ㄓ', zone: 'index-l' },
+                { w: 1, label: '6', sub: '^', zh: 'ˊ', zone: 'index-r' },
+                { w: 1, label: '7', sub: '&', zh: '˙', zone: 'index-r' },
+                { w: 1, label: '8', sub: '*', zh: 'ㄚ', zone: 'middle-r' },
+                { w: 1, label: '9', sub: '(', zh: 'ㄞ', zone: 'ring-r' },
+                { w: 1, label: '0', sub: ')', zh: 'ㄢ', zone: 'pinky-r' },
+                { w: 1, label: '-', sub: '_', zh: 'ㄦ', zone: 'pinky-r' },
+                { w: 1, label: '=', sub: '+', zh: '', zone: 'pinky-r' },
+                { w: 2, label: 'Backspace', zone: 'pinky-r', type: 'func' }
+            ],
+            // QWERTY 列
+            [
+                { w: 1.5, label: 'Tab', zone: 'pinky-l', type: 'func' },
+                { w: 1, label: 'Q', zh: 'ㄆ', zone: 'pinky-l' },
+                { w: 1, label: 'W', zh: 'ㄊ', zone: 'ring-l' },
+                { w: 1, label: 'E', zh: 'ㄍ', zone: 'middle-l' },
+                { w: 1, label: 'R', zh: 'ㄐ', zone: 'index-l' },
+                { w: 1, label: 'T', zh: 'ㄔ', zone: 'index-l' },
+                { w: 1, label: 'Y', zh: 'ㄗ', zone: 'index-r' },
+                { w: 1, label: 'U', zh: 'ㄧ', zone: 'index-r' },
+                { w: 1, label: 'I', zh: 'ㄛ', zone: 'middle-r' },
+                { w: 1, label: 'O', zh: 'ㄟ', zone: 'ring-r' },
+                { w: 1, label: 'P', zh: 'ㄣ', zone: 'pinky-r' },
+                { w: 1, label: '[', zh: '', zone: 'pinky-r' },
+                { w: 1, label: ']', zh: '', zone: 'pinky-r' },
+                { w: 1.5, label: '\\', zh: '', zone: 'pinky-r' }
+            ],
+            // ASDF 列
+            [
+                { w: 1.8, label: 'Caps', zone: 'pinky-l', type: 'func' },
+                { w: 1, label: 'A', zh: 'ㄇ', zone: 'pinky-l' },
+                { w: 1, label: 'S', zh: 'ㄋ', zone: 'ring-l' },
+                { w: 1, label: 'D', zh: 'ㄎ', zone: 'middle-l' },
+                { w: 1, label: 'F', zh: 'ㄑ', zone: 'index-l', bump: true }, // 定位點
+                { w: 1, label: 'G', zh: 'ㄕ', zone: 'index-l' },
+                { w: 1, label: 'H', zh: 'ㄘ', zone: 'index-r' },
+                { w: 1, label: 'J', zh: 'ㄨ', zone: 'index-r', bump: true }, // 定位點
+                { w: 1, label: 'K', zh: 'ㄜ', zone: 'middle-r' },
+                { w: 1, label: 'L', zh: 'ㄠ', zone: 'ring-r' },
+                { w: 1, label: ';', zh: 'ㄤ', zone: 'pinky-r' },
+                { w: 1, label: '\'', zh: 'ㄦ', zone: 'pinky-r' },
+                { w: 2.2, label: 'Enter', zone: 'pinky-r', type: 'func' }
+            ],
+            // ZXCV 列
+            [
+                { w: 2.3, label: 'Shift', zone: 'pinky-l', type: 'func' },
+                { w: 1, label: 'Z', zh: 'ㄈ', zone: 'pinky-l' },
+                { w: 1, label: 'X', zh: 'ㄌ', zone: 'ring-l' },
+                { w: 1, label: 'C', zh: 'ㄏ', zone: 'middle-l' },
+                { w: 1, label: 'V', zh: 'ㄒ', zone: 'index-l' },
+                { w: 1, label: 'B', zh: 'ㄖ', zone: 'index-l' },
+                { w: 1, label: 'N', zh: 'ㄙ', zone: 'index-r' },
+                { w: 1, label: 'M', zh: 'ㄩ', zone: 'index-r' },
+                { w: 1, label: ',', zh: 'ㄝ', zone: 'middle-r' },
+                { w: 1, label: '.', zh: 'ㄡ', zone: 'ring-r' },
+                { w: 1, label: '/', zh: 'ㄥ', zone: 'pinky-r' },
+                { w: 2.7, label: 'Shift', zone: 'pinky-r', type: 'func' }
+            ],
+            // 底部列
+            [
+                { w: 1.5, label: 'Ctrl', zone: 'pinky-l', type: 'func' },
+                { w: 1.2, label: 'Win', zone: 'pinky-l', type: 'func' },
+                { w: 1.2, label: 'Alt', zone: 'pinky-l', type: 'func' },
+                { w: 7.6, label: 'Space', zone: 'thumb', type: 'func' },
+                { w: 1.2, label: 'Alt', zone: 'pinky-r', type: 'func' },
+                { w: 1.2, label: 'Win', zone: 'pinky-r', type: 'func' },
+                { w: 1.2, label: 'Ctrl', zone: 'pinky-r', type: 'func' }
+            ]
+        ];
+
+        // --- 主元件 ---
+        function KeyboardExplainer() {
+            const [viewMode, setViewMode] = useState('zones');
+            const [tutorialSection, setTutorialSection] = useState('anchors');
+            const [hoveredKey, setHoveredKey] = useState(null);
+
+            const getInfoContent = () => {
+                if (viewMode === 'tutorial') {
+                    const section = TUTORIAL_SECTIONS[tutorialSection];
+                    return {
+                        title: section.label,
+                        content: section.desc,
+                        colorClass: 'bg-indigo-50 border-indigo-200'
+                    };
+                }
+                if (!hoveredKey) {
+                    return {
+                        title: viewMode === 'zones' ? '指法區域說明' : '按鍵功能說明',
+                        content: '請將滑鼠游標移動到鍵盤按鍵上，查看詳細介紹。',
+                        colorClass: 'bg-slate-100 border-slate-300'
+                    };
+                }
+                if (viewMode === 'zones') {
+                    const zoneData = FINGER_ZONES[hoveredKey.zone];
+                    return {
+                        title: zoneData.label,
+                        content: zoneData.desc,
+                        colorClass: zoneData.color
+                    };
+                } else {
+                    let desc = '一般文字輸入鍵';
+                    let title = hoveredKey.label;
+
+                    if (hoveredKey.type === 'func' || FUNCTION_DESC[hoveredKey.label]) {
+                        const descText = FUNCTION_DESC[hoveredKey.label] || (hoveredKey.label.startsWith('F') ? FUNCTION_DESC['F1-F12'] : '特殊功能鍵');
+                        title = hoveredKey.label;
+                        desc = descText;
+                    } else {
+                        title = `${hoveredKey.zh || hoveredKey.label}`;
+                        desc = `輸入注音 "${hoveredKey.zh || ''}" (英文鍵: ${hoveredKey.label})`;
+                    }
+
+                    return {
+                        title: title,
+                        content: desc,
+                        colorClass: 'bg-blue-100 border-blue-300'
+                    };
+                }
+            };
+
+            const infoData = getInfoContent();
+
+            return (
+                <div className="min-h-screen bg-slate-50 p-6 flex flex-col items-center font-sans">
+                    <div className="text-center mb-8 max-w-2xl">
+                        <h1 className="text-3xl font-bold text-slate-800 mb-3 flex items-center justify-center gap-3">
+                            <KeyboardIcon className="w-8 h-8" />
+                            鍵盤構造與指法導覽
+                        </h1>
+                        <p className="text-slate-600">
+                            透過互動式導覽，學習正確的「手指擺放位置」、「功能鍵用途」以及「注音聲調分區」。
+                        </p>
+                    </div>
+
+                    <div className="flex bg-white p-1 rounded-xl shadow-sm border border-slate-200 mb-6">
+                        <button onClick={() => setViewMode('zones')} className={`px-6 py-2 rounded-lg flex items-center gap-2 transition-all ${viewMode === 'zones' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50'}`}>
+                            <Hand className="w-4 h-4" /> 指法分區
+                        </button>
+                        <button onClick={() => setViewMode('functions')} className={`px-6 py-2 rounded-lg flex items-center gap-2 transition-all ${viewMode === 'functions' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50'}`}>
+                            <MousePointer2 className="w-4 h-4" /> 按鍵功能
+                        </button>
+                        <button onClick={() => setViewMode('tutorial')} className={`px-6 py-2 rounded-lg flex items-center gap-2 transition-all ${viewMode === 'tutorial' ? 'bg-emerald-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50'}`}>
+                            <Layout className="w-4 h-4" /> 分區教學
+                        </button>
+                    </div>
+
+                    {/* 指法分區說明圖例 (新增) */}
+                    {viewMode === 'zones' && (
+                        <div className="flex flex-wrap justify-center gap-3 mb-6 max-w-4xl animate-fade-in-down">
+                            {/* 左手 */}
+                            <div className="flex items-center gap-2 p-2 bg-white rounded-lg border border-slate-200 shadow-sm">
+                                <span className="text-xs font-bold text-slate-400 mr-1">左手</span>
+                                {[ 'pinky-l', 'ring-l', 'middle-l', 'index-l'].map(zone => (
+                                    <div key={zone} className="flex items-center gap-1">
+                                        <div className={`w-3 h-3 rounded-full ${FINGER_ZONES[zone].color.split(' ')[0]}`}></div>
+                                        <span className="text-xs text-slate-600">{FINGER_ZONES[zone].label.replace('左手', '').replace('指', '')}</span>
+                                    </div>
+                                ))}
+                            </div>
+
+                             {/* 拇指 */}
+                             <div className="flex items-center gap-2 p-2 bg-white rounded-lg border border-slate-200 shadow-sm">
+                                <div className="flex items-center gap-1">
+                                    <div className={`w-3 h-3 rounded-full ${FINGER_ZONES['thumb'].color.split(' ')[0]}`}></div>
+                                    <span className="text-xs text-slate-600">拇指</span>
+                                </div>
+                            </div>
+
+                            {/* 右手 */}
+                            <div className="flex items-center gap-2 p-2 bg-white rounded-lg border border-slate-200 shadow-sm">
+                                <span className="text-xs font-bold text-slate-400 mr-1">右手</span>
+                                {[ 'index-r', 'middle-r', 'ring-r', 'pinky-r'].map(zone => (
+                                    <div key={zone} className="flex items-center gap-1">
+                                        <div className={`w-3 h-3 rounded-full ${FINGER_ZONES[zone].color.split(' ')[0]}`}></div>
+                                        <span className="text-xs text-slate-600">{FINGER_ZONES[zone].label.replace('右手', '').replace('指', '')}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {viewMode === 'tutorial' && (
+                        <div className="flex gap-2 mb-6 animate-fade-in-down">
+                            {Object.entries(TUTORIAL_SECTIONS).map(([key, section]) => (
+                                <button
+                                    key={key}
+                                    onClick={() => setTutorialSection(key)}
+                                    className={`px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2 border-2 transition-all ${tutorialSection === key ? 'border-slate-800 bg-slate-800 text-white scale-105' : 'border-slate-200 bg-white text-slate-500 hover:border-slate-400'}`}
+                                >
+                                    {section.icon}
+                                    {section.label}
+                                </button>
+                            ))}
+                        </div>
+                    )}
+
+                    <div className="bg-slate-800 p-6 rounded-3xl shadow-2xl border-b-[8px] border-slate-900 overflow-x-auto max-w-full">
+                        <div className="flex flex-col gap-2 min-w-[900px]">
+                            {KEYBOARD_ROWS.map((row, rIndex) => (
+                                <div key={rIndex} className="flex gap-2 justify-center">
+                                    {row.map((key, kIndex) => {
+                                        if (key.gap) return <div key={`gap-${kIndex}`} style={{ width: `${key.w * 60}px` }}></div>;
+
+                                        let keyColorClass = 'bg-slate-700 text-slate-300 border-slate-600';
+                                        let opacityClass = 'opacity-100';
+                                        let isHighlightedTutorial = false;
+
+                                        if (viewMode === 'zones') {
+                                            keyColorClass = FINGER_ZONES[key.zone].color.replace('bg-', 'bg-opacity-90 bg-').replace('border-', 'border-b-4 border-');
+                                        } else if (viewMode === 'functions') {
+                                            if (key.type === 'func') {
+                                                keyColorClass = 'bg-slate-600 text-white border-b-4 border-slate-800 font-bold';
+                                            } else {
+                                                keyColorClass = 'bg-slate-100 text-slate-800 border-b-4 border-slate-300';
+                                            }
+                                        } else if (viewMode === 'tutorial') {
+                                            opacityClass = 'opacity-20 grayscale';
+                                            keyColorClass = 'bg-slate-200 text-slate-800 border-b-4 border-slate-300';
+
+                                            if (tutorialSection === 'anchors') {
+                                                if (key.label === 'F' || key.label === 'J') {
+                                                    opacityClass = 'opacity-100';
+                                                    isHighlightedTutorial = true;
+                                                    keyColorClass = TUTORIAL_SECTIONS['anchors'].highlightClass;
+                                                }
+                                            } else if (tutorialSection === 'zhuyin') {
+                                                if (key.zh) {
+                                                    opacityClass = 'opacity-100';
+                                                    keyColorClass = TUTORIAL_SECTIONS['zhuyin'].highlightClass;
+                                                }
+                                            } else if (tutorialSection === 'tones') {
+                                                if (['3', '4', '6', '7'].includes(key.label) || key.label === 'Space') {
+                                                    opacityClass = 'opacity-100';
+                                                    isHighlightedTutorial = true;
+                                                    keyColorClass = TUTORIAL_SECTIONS['tones'].highlightClass;
+                                                }
+                                            }
+                                        }
+
+                                        const isHovered = hoveredKey === key;
+                                        if (isHovered && opacityClass !== 'opacity-20 grayscale') {
+                                            keyColorClass += ' brightness-110 transform -translate-y-1';
+                                            if (viewMode === 'functions') keyColorClass = 'bg-blue-400 text-white border-blue-600 border-b-4';
+                                        }
+
+                                        return (
+                                            <div
+                                                key={`${rIndex}-${kIndex}`}
+                                                onMouseEnter={() => setHoveredKey(key)}
+                                                onMouseLeave={() => setHoveredKey(null)}
+                                                style={{ width: `${key.w * 60}px`, height: '60px' }}
+                                                className={`${keyColorClass} ${opacityClass} relative rounded-lg flex flex-col items-center justify-center cursor-pointer transition-all duration-300 select-none shadow-sm`}
+                                            >
+                                                {key.zh ? (
+                                                    <>
+                                                        <span className="absolute left-1.5 top-1 text-[10px] font-bold opacity-50">{key.label}</span>
+                                                        {key.sub && <span className="absolute right-1.5 top-1 text-[10px] font-bold opacity-50">{key.sub}</span>}
+                                                        <span className="text-2xl font-bold mb-1 z-10">{key.zh}</span>
+                                                    </>
+                                                ) : (
+                                                    <span className={`text-sm font-bold`}>{key.label === 'Win' ? '⊞' : key.label}</span>
+                                                )}
+
+                                                {key.bump && (
+                                                    <>
+                                                        <div className={`absolute bottom-1 w-4 h-1 rounded-full ${isHighlightedTutorial && tutorialSection === 'anchors' ? 'bg-slate-800 animate-pulse' : 'bg-current opacity-30'}`}></div>
+                                                        {isHighlightedTutorial && tutorialSection === 'anchors' && (
+                                                            <span className="absolute -bottom-8 text-xs text-yellow-400 font-bold animate-bounce whitespace-nowrap">👆 摸這裡</span>
+                                                        )}
+                                                    </>
+                                                )}
+
+                                                {tutorialSection === 'tones' && isHighlightedTutorial && (
+                                                    <span className="absolute -top-3 bg-blue-600 text-white text-[10px] px-1 rounded shadow-sm scale-90">
+                                                        {key.label === '3' ? '三聲' : key.label === '4' ? '四聲' : key.label === '6' ? '二聲' : key.label === '7' ? '輕聲' : key.label === 'Space' ? '一聲' : ''}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className={`mt-8 w-full max-w-3xl p-6 rounded-2xl border-l-8 shadow-lg transition-colors duration-300 flex gap-4 items-start ${infoData.colorClass}`}>
+                        <div className="p-3 bg-white bg-opacity-40 rounded-full shrink-0">
+                            <Info className="w-6 h-6 text-slate-700" />
+                        </div>
+                        <div>
+                            <h2 className="text-xl font-bold text-slate-800 mb-1">{infoData.title}</h2>
+                            <p className="text-slate-700 text-lg leading-relaxed">{infoData.content}</p>
+                            {viewMode === 'zones' && hoveredKey && (
+                                <p className="mt-2 text-sm text-slate-500 font-medium bg-white bg-opacity-50 inline-block px-2 py-1 rounded">
+                                    💡 試著只用這隻手指去按這個顏色的區域
+                                </p>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // 渲染到 DOM
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<KeyboardExplainer />);
+    </script>
+</body>
+</html>
